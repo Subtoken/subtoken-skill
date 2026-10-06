@@ -1,0 +1,7 @@
+interface:
+  display_name: "Subtoken"
+  short_description: "Work with Subtoken user APIs, keys, usage and marketplace"
+  default_prompt: "Use $subtoken to inspect and manage my Subtoken account, API keys, usage, recharge orders, and marketplace activity."
+
+policy:
+  allow_implicit_invocation: true
