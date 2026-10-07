@@ -272,6 +272,10 @@ so it lags real time slightly.
 
 ## Payouts
 
+Payout requests have no documented `Idempotency-Key` contract. If a request
+times out, inspect `GET /seller/payouts` and `GET /seller/payouts/balance`
+before submitting again; the first request may already be reserved for review.
+
 The payout ledger is **derived**: `billed × revenue_share − approved − paid`.
 It is only enabled when the operator configures a revenue share; otherwise
 `payouts_enabled` is `false` and requests are refused.

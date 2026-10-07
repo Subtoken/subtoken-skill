@@ -90,6 +90,11 @@ curl -sS "${H[@]}" "$SUBTOKEN_API/payment/checkout-info" | jq '.data.plans | len
 
 ## Creating an order
 
+Order creation has no documented `Idempotency-Key` contract. If the request
+times out or its response is lost, check `GET /payment/orders/my` for a matching
+pending order before creating another. Compare amount, payment method, and
+creation time; do not assume a network timeout means the order was not created.
+
 ```bash
 curl -sS "${H[@]}" -H 'Content-Type: application/json' \
   -X POST "$SUBTOKEN_API/payment/orders" -d '{

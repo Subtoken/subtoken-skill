@@ -203,6 +203,11 @@ curl -sS "${H[@]}" "$SUBTOKEN_API/channels/available" | jq '.data[] | {name, pla
 
 ## Redeem codes
 
+Redemption has no documented `Idempotency-Key` contract. Codes are one-shot, so
+after a timeout inspect `GET /redeem/history` before trying again. A failed
+retry can mean the first request already redeemed the code; it does not by
+itself establish whether the intended balance or entitlement was applied.
+
 ```bash
 # Redeem (spends the code; case-sensitive, one-shot)
 curl -sS "${H[@]}" -H 'Content-Type: application/json' \

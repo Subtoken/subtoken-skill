@@ -145,6 +145,11 @@ panel key does. Only the security surface is session-token-only.
   buying a marketplace listing, requesting a payout, and redeeming a code all
   spend balance irreversibly. Print the amount, currency, and target before
   calling, and get explicit confirmation.
+- **Do not blindly retry a timed-out money write.** Payment-order creation,
+  redeem-code redemption, and seller payout requests do not currently document
+  an idempotency-key contract. A lost response can leave the outcome uncertain;
+  inspect the relevant order, redemption history, or payout state before
+  submitting another write. See each reference for the operation-specific read.
 - **Marketplace purchases are idempotent only by nonce.** `POST
   /marketplace/listings/:id/orders` takes a `nonce`; reusing it returns the
   original order instead of charging twice. Always generate a fresh nonce per
