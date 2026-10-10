@@ -119,13 +119,15 @@ panel key sent to the gateway returns `PANEL_KEY_CANNOT_INFER`.
 4. Inspect the response, then read the resource back to verify the result.
 5. Keep credentials and returned secrets out of logs, transcripts, and output.
 
-Money writes need special care. Payment-order creation, redeem-code redemption,
-and payout requests have no documented `Idempotency-Key` contract. If a request
-times out, inspect the resulting order, redemption history, or payout state
-before retrying. Marketplace purchases use a required `nonce`; a retry must use
-the same nonce to retrieve the original order. See the operation-specific notes
-in [Payments](references/payments.md), [Account](references/account.md),
-[Seller](references/seller.md), and [Marketplace](references/marketplace.md).
+Money writes need special care. Payment-order creation, redemption, and seller
+payout requests accept `Idempotency-Key`: create one fresh key per logical write,
+and reuse that key only with the identical request when retrying. The shipped
+`idempotency.observe_only` default still allows keyless requests, but they are not
+deduplicated; deployments may enforce the key. Marketplace purchases instead use
+a body `nonce`, which must be reused for a retry of the same purchase. See the
+operation-specific notes in [Payments](references/payments.md),
+[Account](references/account.md), [Seller](references/seller.md), and
+[Marketplace](references/marketplace.md).
 
 ## API references
 

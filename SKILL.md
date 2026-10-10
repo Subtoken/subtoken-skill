@@ -120,6 +120,28 @@ individual request shapes, response examples, and the gotchas that bite.
 "Panel key" means a panel key works; a session token also works everywhere a
 panel key does. Only the security surface is session-token-only.
 
+## Ownership is assigned from your authentication
+
+When you use the seller OAuth flow, the server assigns the new account to the
+Subtoken user represented by your panel key or session. **You do not send
+`owner_user_id`**, and the user endpoint does not ask you to discover or supply
+a numeric owner ID.
+
+This is separate from tenant/instance selection and from inference-key routing:
+a successful OAuth create proves the account was created for the authenticated
+user, but it does not automatically bind the account to an inference-key group.
+Verify the returned account appears in `GET /api/v1/seller/accounts` for your
+caller before treating onboarding as complete.
+
+If an account you expected to own is missing from your seller account list or is
+shown with the wrong ownership, stop and contact the Subtoken operator. Do not
+create a duplicate account or repeat Google OAuth; that can produce a second
+live token set for the same Google account.
+
+The separate Gemini Redeemer service's `subtoken_api_key` field is not
+necessarily a Subtoken panel key. Use the panel key or session belonging to the
+Subtoken user who should own the account.
+
 ## Workflow
 
 1. **Identify the credential you have.** Inference key → the introspection
@@ -145,15 +167,17 @@ panel key does. Only the security surface is session-token-only.
   buying a marketplace listing, requesting a payout, and redeeming a code all
   spend balance irreversibly. Print the amount, currency, and target before
   calling, and get explicit confirmation.
-- **Do not blindly retry a timed-out money write.** Payment-order creation,
-  redeem-code redemption, and seller payout requests do not currently document
-  an idempotency-key contract. A lost response can leave the outcome uncertain;
-  inspect the relevant order, redemption history, or payout state before
-  submitting another write. See each reference for the operation-specific read.
-- **Marketplace purchases are idempotent only by nonce.** `POST
-  /marketplace/listings/:id/orders` takes a `nonce`; reusing it returns the
-  original order instead of charging twice. Always generate a fresh nonce per
-  attempt and never reuse one across listings.
+- **Use idempotency for money writes.** `POST /payment/orders`, `POST /redeem`,
+  and `POST /seller/payouts` accept `Idempotency-Key`. Generate a fresh key for
+  each logical operation and reuse that exact key with the identical payload
+  only when retrying that operation; the same key with different intent conflicts.
+  The shipped `idempotency.observe_only` default still accepts keyless writes,
+  but keyless calls are not deduplicated, and deployments may enable strict key
+  enforcement. If the outcome is uncertain and you did not send a key, inspect
+  the relevant order, redemption history, or payout state before retrying.
+- **Marketplace orders use a body `nonce` instead of the header.** Reuse the
+  same nonce when retrying the same purchase. Generate a new nonce for each new
+  purchase and never reuse one across listings.
 - **Registration and login are captcha-gated.** `subtoken.net` runs Turnstile,
   so `POST /api/v1/auth/login` returns `400 TURNSTILE_VERIFICATION_FAILED`
   without a `turnstile_token`. Headless login is not the normal path — reuse a

@@ -1,8 +1,10 @@
 # Seller console — supply, listings, payouts
 
 `/api/v1/seller`. A **panel key or session token** works, and `seller_status`
-must be `active`. Every route re-checks consent and per-account ownership on
-the server, so a `403` here means consent, not a bad id.
+must be `active` for non-admin users. Each route also rechecks resource ownership;
+a `403` can indicate inactive/revoked seller consent **or** an ownership/access
+check, so inspect the caller status and requested resource rather than assuming
+one cause.
 
 ```bash
 H=(-H "Authorization: Bearer $SUBTOKEN_PANEL_AUTH" -H 'Accept: application/json')
@@ -119,53 +121,70 @@ on the benchmark server's next poll, so it is not immediate.
 ### OAuth onboarding
 
 Self-serve OAuth so the seller completes provider authorisation themselves.
-Ownership is forced server-side.
+Ownership is forced server-side to the authenticated user. For an account
+purchased for a specific dashboard user, this is the preferred path; an active
+OAuth account in the right group is not enough to prove user ownership.
 
 Platforms on the allowlist: `antigravity`, `openai`, `gemini`, `grok`.
 
-```bash
-# 1. Get an authorisation URL (optionally bound to one of your proxies)
-sess=$(curl -sS "${H[@]}" -H 'Content-Type: application/json' \
-  -X POST "$SUBTOKEN_API/seller/oauth/openai/auth-url" -d '{"proxy_id":3}')
-echo "$sess" | jq '.data | {session_id, state, auth_url}'
+For Antigravity, use these endpoints in order:
+
+```text
+POST /api/v1/seller/oauth/antigravity/auth-url
+POST /api/v1/seller/oauth/antigravity/exchange-code
+POST /api/v1/seller/oauth/accounts
 ```
 
-```bash
-# 2. Exchange the code the provider gave you
-curl -sS "${H[@]}" -H 'Content-Type: application/json' \
-  -X POST "$SUBTOKEN_API/seller/oauth/openai/exchange-code" -d "{
-    \"session_id\": $(echo "$sess" | jq '.data.session_id'),
-    \"state\":      $(echo "$sess" | jq '.data.state'),
-    \"code\":       \"PASTE_CODE\",
-    \"proxy_id\":   3
-  }" | jq '.data | {token_type, expires_in}'   # tokens: never print
-```
+The auth-url request body may contain an optional `proxy_id`; if present, the
+proxy must be owned by the authenticated user. Complete provider consent before
+exchanging the code, then submit the exchange credentials to
+`/seller/oauth/accounts` with `platform: "antigravity"`. The account-create
+body accepts `name`, `platform`, `credentials`, optional `priority`, optional
+`concurrency`, and optional user-owned `proxy_id`; it does **not** accept
+`group_ids`. Group binding is a separate seller operation.
+For this OAuth flow, use the same authenticated interactive API session as the rest
+of the skill. Keep `auth_url`, `session_id`, `state`, the provider callback code,
+and exchange credentials in process memory; do not print them, place the callback
+code in shell command arguments/history, or log raw request/response bodies.
 
-```bash
-# 3. Register the authorised account
-curl -sS "${H[@]}" -H 'Content-Type: application/json' \
-  -X POST "$SUBTOKEN_API/seller/oauth/accounts" -d '{
-    "name": "my ChatGPT account",
-    "platform": "openai",
-    "credentials": { "…": "tokens from step 2" },
-    "concurrency": 3,
-    "proxy_id": 3
-  }' | jq '.data'
-```
+1. **Start auth.** For Antigravity, call
+   `POST /api/v1/seller/oauth/antigravity/auth-url` with an optional
+   `{"proxy_id": <your_proxy_id>}` body. Keep the returned `session_id`, `state`,
+   and `auth_url` in memory. Open the URL only in the intended provider-authenticated
+   browser session, using the configured egress.
+2. **Complete consent and capture the callback.** Use the account the user
+   intended to authorize. Assert the callback's `state` exactly matches the
+   state returned by this auth-url request. Do not pick an older callback from
+   browser history or reuse a code from another session.
+3. **Exchange.** For Antigravity, send
+   `{"session_id": <same session_id>, "state": <same state>, "code": <callback code>}`
+   to `POST /api/v1/seller/oauth/antigravity/exchange-code`. Process the response
+   in memory; it contains live access/refresh credentials. If the session or
+   state is rejected/expired, start a fresh authorization rather than retrying
+   the stale code.
+4. **Create the owned account.** Send the exchange credentials to
+   `POST /api/v1/seller/oauth/accounts` with `name`, `platform: "antigravity"`,
+   optional `priority` / `concurrency`, and optional user-owned `proxy_id`.
+   The server forces ownership to the authenticated user. Do not send
+   `group_ids`; that is not part of the user endpoint contract. Inspect only the
+   returned account ID/status, not credentials.
+5. **Verify.** Re-read `GET /api/v1/seller/accounts` as the same user and confirm
+   the new ID appears in the caller's owned account list. Account ownership
+   does not by itself bind the account to an inference-key group; bind only via
+   an eligible seller-owned group and verify the intended routing separately.
 
-`session_id`, `state`, and `code` must all come from the same `auth-url` step —
+`session_id`, `state`, and `code` must all come from the same auth-url step —
 the exchange is validated against them. OpenAI and Grok accept an explicit
 `redirect_uri`; Gemini derives it server-side and additionally takes `project_id`,
-`oauth_type`, and `tier_id`, which must be repeated **identically** at exchange
-time.
+`oauth_type`, and `tier_id`, which must be repeated identically at exchange time.
 
-The exchange response contains live access and refresh tokens. Pipe it straight
-into the register step; never log it.
+## Seller-owned groups and Smart Router membership
 
-## Groups (private by default)
-
-Seller-owned groups are **always private** — they never appear in
-`/api/v1/groups/available`, and consumers cannot bind themselves to them.
+Seller-owned groups are **not directly consumer-bindable** and do not appear in
+`/api/v1/groups/available`. The `is_public` field controls only whether their
+accounts participate in the shared Subtoken Smart Router pool; it does not expose
+the group for binding to ordinary consumer inference keys and is unrelated to
+marketplace listings.
 
 ```bash
 curl -sS "${H[@]}" "$SUBTOKEN_API/seller/groups" |
@@ -183,10 +202,10 @@ curl -sS "${H[@]}" -H 'Content-Type: application/json' \
 curl -sS "${H[@]}" -X DELETE "$SUBTOKEN_API/seller/groups/5"
 ```
 
-`is_public` is the **Smart Router membership** toggle: `true` joins your
-accounts to the shared routing pool, `false` keeps the group private to your own
-keys. It is unrelated to the marketplace listing directory — public groups do
-not publish your accounts for sale. `DELETE` fails while accounts are bound.
+`is_public` is the **Smart Router membership** toggle: `true` contributes the
+group's schedulable accounts to the shared routing pool; `false` excludes them.
+Neither setting publishes your accounts in the marketplace directory.
+`DELETE` fails while accounts are bound.
 
 ## Bind accounts to groups
 
@@ -272,9 +291,14 @@ so it lags real time slightly.
 
 ## Payouts
 
-Payout requests have no documented `Idempotency-Key` contract. If a request
-times out, inspect `GET /seller/payouts` and `GET /seller/payouts/balance`
-before submitting again; the first request may already be reserved for review.
+Payout requests accept `Idempotency-Key`. Generate one fresh key per logical
+payout request and reuse it with the identical amount/note only when retrying
+that same request. The shipped `idempotency.observe_only` default accepts
+keyless requests without deduplication, while deployments may enable strict key
+requirements. If a request was keyless or its outcome is otherwise uncertain,
+inspect `GET /seller/payouts` and `GET /seller/payouts/balance` before submitting
+another request; a duplicate withdrawal row may otherwise be invisible in
+`available` until operator approval.
 
 The payout ledger is **derived**: `billed × revenue_share − approved − paid`.
 It is only enabled when the operator configures a revenue share; otherwise
@@ -305,6 +329,7 @@ curl -sS "${H[@]}" "$SUBTOKEN_API/seller/payouts" |
   jq '.data.items[] | {id, amount, status, requested_at, reviewed_at, payout_reference}'
 
 curl -sS "${H[@]}" -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $PAYOUT_IDEMPOTENCY_KEY" \
   -X POST "$SUBTOKEN_API/seller/payouts" -d '{"amount":33.36,"note":"October"}' | jq '.data'
 
 # Cancel your own pending request

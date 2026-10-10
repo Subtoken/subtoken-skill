@@ -90,13 +90,18 @@ curl -sS "${H[@]}" "$SUBTOKEN_API/payment/checkout-info" | jq '.data.plans | len
 
 ## Creating an order
 
-Order creation has no documented `Idempotency-Key` contract. If the request
-times out or its response is lost, check `GET /payment/orders/my` for a matching
-pending order before creating another. Compare amount, payment method, and
-creation time; do not assume a network timeout means the order was not created.
+Order creation accepts `Idempotency-Key`. Generate a fresh unique key for each
+logical order. If the response is lost, retry with the **same key and identical
+request body** to replay the original response instead of creating a second
+payable order; reusing a key with a different body returns a conflict. The
+shipped `idempotency.observe_only` default accepts keyless calls for compatibility,
+but keyless calls are not deduplicated. Deployments can disable observe-only and
+require keys, so always send one for writes. If you did not send a key, inspect
+`GET /payment/orders/my` for a matching pending order before retrying.
 
 ```bash
 curl -sS "${H[@]}" -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $PAYMENT_IDEMPOTENCY_KEY" \
   -X POST "$SUBTOKEN_API/payment/orders" -d '{
     "amount": 50,
     "payment_type": "alipay",

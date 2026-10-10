@@ -203,14 +203,17 @@ curl -sS "${H[@]}" "$SUBTOKEN_API/channels/available" | jq '.data[] | {name, pla
 
 ## Redeem codes
 
-Redemption has no documented `Idempotency-Key` contract. Codes are one-shot, so
-after a timeout inspect `GET /redeem/history` before trying again. A failed
-retry can mean the first request already redeemed the code; it does not by
-itself establish whether the intended balance or entitlement was applied.
+Redemption accepts `Idempotency-Key`. Use a fresh unique key for each logical
+redemption and reuse it with the exact same code only when retrying that same
+redemption. The shipped `idempotency.observe_only` default accepts keyless
+requests but does not deduplicate them; some deployments may require a key. If
+the first attempt was keyless and timed out, check `GET /redeem/history` before
+trying again.
 
 ```bash
 # Redeem (spends the code; case-sensitive, one-shot)
 curl -sS "${H[@]}" -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $REDEEM_IDEMPOTENCY_KEY" \
   -X POST "$SUBTOKEN_API/redeem" -d '{"code":"GIFT-ABC-123"}' | jq '.data'
 ```
 
