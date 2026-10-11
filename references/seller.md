@@ -88,6 +88,26 @@ The response is a projection with credential material stripped — `id`, `name`,
 `platform`, `type`, `base_url`, `status`, `schedulable`, `benchmark_status`,
 `priority`, `concurrency`, `proxy_id`, `group_ids`, `updated_at`.
 
+New seller-owned accounts are created with `status: active` and
+`schedulable: true`. `schedulable` is an explicit routing switch, separate from
+`status`; the account must still pass other routing gates such as the API-key
+benchmark requirement. Change the switch only for an account owned by the
+calling seller:
+
+```bash
+curl -sS "${H[@]}" -H 'Content-Type: application/json' \
+  -X PATCH "$SUBTOKEN_API/seller/accounts/9/schedulable" \
+  -d '{"schedulable":false}' | jq '.data | {id, status, schedulable}'
+
+curl -sS "${H[@]}" -H 'Content-Type: application/json' \
+  -X PATCH "$SUBTOKEN_API/seller/accounts/9/schedulable" \
+  -d '{"schedulable":true}' | jq '.data | {id, status, schedulable}'
+```
+
+The `schedulable` field is required and must be a JSON boolean. This endpoint
+does not change account `status`, clear benchmark state, or bypass other routing
+eligibility checks.
+
 ```bash
 curl -sS "${H[@]}" "$SUBTOKEN_API/seller/accounts" |
   jq '.data.items[] | {id, name, status, schedulable, benchmark_status, group_ids}'

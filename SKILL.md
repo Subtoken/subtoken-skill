@@ -131,7 +131,13 @@ This is separate from tenant/instance selection and from inference-key routing:
 a successful OAuth create proves the account was created for the authenticated
 user, but it does not automatically bind the account to an inference-key group.
 Verify the returned account appears in `GET /api/v1/seller/accounts` for your
-caller before treating onboarding as complete.
+caller before treating onboarding as complete. Seller-owned accounts start
+with the persistent `schedulable` switch enabled; use the ownership-scoped
+`PATCH /api/v1/seller/accounts/{id}/schedulable` endpoint documented in
+[references/seller.md](references/seller.md) to pause or resume routing.
+
+This is separate from status, benchmark, and other eligibility gates. Enabling
+`schedulable` does not bypass those gates.
 
 If an account you expected to own is missing from your seller account list or is
 shown with the wrong ownership, stop and contact the Subtoken operator. Do not
